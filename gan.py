@@ -22,20 +22,27 @@ def argmax(inp):
     return out
 
 
+def inverse_argmax(num,l):
+    temp=[0]*l
+    temp[num]=1
+    return temp
+
+
 class dataGenerator:
     def __init__(self, fp='./dataset/dataset.txt'):
-        file = open(fp, 'r', encoding='utf-8')
-        self.total = 0
-        arr = []
-        for line in file:
-            self.total += 1
-            s = line.replace('\n', '')
+        self.content = open(fp, 'r', encoding='utf-8').readlines()
+
+    def get(self, batch_size):
+        idx = np.random.randint(0, len(self.content), size=batch_size)
+        out = []
+        l = len(char2num)
+        for i in idx:
             temp = []
+            s = self.content[i].replace('\n', '')
             for c in s:
-                temp.append(char2num.get(c, 0))
-            arr.append(temp)
-        self.out = np.array(arr)
-        print('Found {} sentences'.format(self.total))
+                temp.append(inverse_argmax(int(char2num.get(c, '0')), l))
+            out.append(temp)
+        return np.array(out)
 
 
 class GAN:
@@ -68,7 +75,7 @@ class GAN:
         self.dis.trainable = True
         noise = Input(shape=(8))
         fake_poem = self.gen(noise)
-        real_poem = Input(shape=(7))
+        real_poem = Input(shape=(7, self.word_count))
         fake_out = self.dis(fake_poem)
         real_out = self.dis(real_poem)
         self.d_train_model = Model(inputs=[real_poem, noise],
@@ -84,6 +91,11 @@ class GAN:
         self.g_train_model = Model(noise_gen, out)
         self.g_train_model.compile(optimizer=self.optimizer, loss='mse')
 
+        noise_p = Input(shape=(8))
+        pre = self.gen(noise_p)
+        pre = Lambda(argmax)(pre)
+        self.predict_model = Model(noise_p, pre)
+
     def train(self, epoch=10000, sample_interval=5, sample_num=8):
         data = dataGenerator()
         start_time = datetime.datetime.now()
@@ -92,8 +104,7 @@ class GAN:
         fake_out = np.zeros([self.batch_size, 1])
         gp_out = np.ones([self.batch_size, 1])
         for i in range(epoch):
-            idx = np.random.randint(0, data.total, self.batch_size)
-            real_poem = data.out[idx]
+            real_poem = data.get(self.batch_size)
             noise = np.random.normal(0.0, 0.1, size=[self.batch_size,
                                                      8]).astype('float32')
             d_loss = self.d_train_model.train_on_batch(
@@ -121,24 +132,22 @@ class GAN:
         out = Reshape((7, 8))(out)  # (7,8)
         out = LSTM(1024, return_sequences=True)(out)  # (7, 1024)
         out = Dense(self.word_count)(out)  # (7, word_count)
-        out = Lambda(argmax)(out)  # (7)
         gen = Model(inputs=inp, outputs=out)
         return gen
 
     def build_dis(self):
-        inp = Input(shape=(7))  # (7)
-        out = Embedding(self.word_count + 2, 300,
-                        input_length=7)(inp)  # (7, 300)
-        out = LSTM(8)(out)  # (8)
-        out = Dense(16)(out)  # (16)
-        out = Dropout(0.6)(out)  # (16)
+        inp = Input(shape=(7, self.word_count))  # (7, word_count)
+        out = LSTM(1024)(inp)  # (1024)
+        out = Dense(1024)(out)  # (1024)
+        out = Dense(512)(out)  # (512)
+        out = Dropout(0.6)(out)  # (64)
         out = Dense(1)(out)  # (1)
         dis = Model(inputs=inp, outputs=out)
         return dis
 
     def sample(self, size):
         noise = np.random.normal(0.0, 0.1, size=[size, 8]).astype('float32')
-        pred = self.gen.predict(noise)
+        pred = self.predict(noise=noise)
         ret = ''
         for i in range(size):
             for j in range(7):
@@ -151,8 +160,11 @@ class GAN:
         self.log.write(s + '\n')
         self.log.flush()
 
+    def predict(self, noise):
+        return self.predict_model.predict(noise)
+
 
 if __name__ == '__main__':
-    gan = GAN()
+    gan = GAN(batch_size=5)
     gan.build()
     gan.train()
