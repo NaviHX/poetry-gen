@@ -1,7 +1,7 @@
 import json
 import os
 import keras
-from keras.layers import Dense, Input, LSTM, Embedding, Reshape, Dropout, Lambda
+from keras.layers import Dense, Input, LSTM, Embedding, Reshape, Dropout, Lambda, Bidirectional
 from keras.optimizers import RMSprop
 from keras.models import Model, load_model
 import keras.backend as K
@@ -24,16 +24,22 @@ class dataGenerator:
         self.content = open(fp, 'r', encoding='utf-8').readlines()
 
     def get(self, batch_size):
-        idx = np.random.randint(0, len(self.content), size=batch_size)
-        out = []
+        idx = np.random.randint(0, len(self.content)-1)
+        sample = []
+        noise = []
         l = len(char2num)
-        for i in idx:
-            temp = []
-            s = self.content[i].replace('\n', '')
+        for i in range(batch_size):
+            temp1 = []
+            temp2 = []
+            s = self.content[idx+i*2].replace('\n', '')
             for c in s:
-                temp.append([int(char2num.get(c, '0')) / amount])
-            out.append(temp)
-        return np.array(out)
+                temp1.append([int(char2num.get(c, '0')) / amount])
+            sample.append(temp1)
+            s2= self.content[idx+i*2+1].replace('\n', '')
+            for c in s2:
+                temp2.extend([int(char2num.get(c, '0'))])
+            noise.append(temp2)
+        return np.array(sample), np.array(noise)
 
 
 class GAN:
@@ -67,7 +73,7 @@ class GAN:
 
         self.gen.trainable = False
         self.dis.trainable = True
-        noise = Input(shape=(32))
+        noise = Input(shape=(7))
         fake_poem = self.gen(noise)
         real_poem = Input(shape=(7, 1))
         fake_out = self.dis(fake_poem)
@@ -80,12 +86,12 @@ class GAN:
 
         self.gen.trainable = True
         self.dis.trainable = False
-        noise_gen = Input(shape=(32))
+        noise_gen = Input(shape=(7))
         out = self.dis(self.gen(noise_gen))
         self.g_train_model = Model(noise_gen, out)
         self.g_train_model.compile(optimizer=self.g_optimizer, loss='mse')
 
-        noise_p = Input(shape=(32))
+        noise_p = Input(shape=(7))
         pre = self.gen(noise_p)
         pre = Reshape((7, ))(pre)
         self.predict_model = Model(noise_p, pre)
@@ -98,9 +104,7 @@ class GAN:
         fake_out = np.zeros([self.batch_size, 1])
         gp_out = np.ones([self.batch_size, 1])
         for i in range(epoch):
-            real_poem = data.get(self.batch_size)
-            noise = np.random.normal(0.0, 0.1, size=[self.batch_size,
-                                                     32]).astype('float32')
+            real_poem, noise=data.get(self.batch_size)
             d_loss = self.d_train_model.train_on_batch(
                 [real_poem, noise], [real_out, fake_out, gp_out])
             g_loss = self.g_train_model.train_on_batch(noise, real_out)
@@ -115,16 +119,12 @@ class GAN:
         self.print_log('Training End At {}'.format(end_time))
         self.print_log('Time Cost : {}'.format(end_time - start_time))
         self.print_log('=== Final Sample ===')
-        self.print_log(self.sample(sample_num, 0.75))
+        self.print_log(self.sample(sample_num, 1))
 
     def build_gen(self):
-        inp = Input(shape=(32))  # (32)
-        out = Dense(64)(inp)  # (64)
-        out = Dense(56)(out)  # (56)
-        out = Reshape((7, 8))(out)  # (7,8)
-        out = LSTM(1024, return_sequences=True)(out)  # (7, 1024)
-        out = Dense(2048)(out)
-        out = Dense(4096)(out)
+        inp = Input(shape=(7))  # (7)
+        out = Embedding(input_dim=self.word_count+2,output_dim=300,input_length=7)(inp) # (7,300)
+        out = Bidirectional(LSTM(128, return_sequences=True))(out) # (7, 256)
         out = Dense(1)(out)  # (7, 1)
         gen = Model(inputs=inp, outputs=out)
         return gen
@@ -143,7 +143,8 @@ class GAN:
         return dis
 
     def sample(self, size, temperature):
-        noise = np.random.normal(0.0, 0.1, size=[size, 32]).astype('float32')
+        # noise = np.random.normal(0.0, 0.1, size=[size, 7])
+        noise = np.random.randint(0,self.word_count,size=[size,7])
         pred = self.predict(noise=noise)
         ret = ''
         for i in range(size):
@@ -157,6 +158,23 @@ class GAN:
             ret += '\n'
         return ret
 
+    def generate_poem(self,count,temperature):
+        ret=''
+        seed=np.random.randint(0,self.word_count,size=[1,7])
+        l=[seed]
+        for i in range(count):
+            pred=self.predict(l[i])
+            l.append(np.abs(np.rint(pred*self.word_count)))
+            for j in range(7):
+                ret += num2char.get(
+                    str(
+                        int(
+                            np.abs(
+                                np.rint(pred[0][j] * self.word_count *
+                                        temperature)))), ' ')
+            ret+='\n'
+        return ret
+
     def print_log(self, s):
         print(s)
         self.log.write(s + '\n')
@@ -167,6 +185,6 @@ class GAN:
 
 
 if __name__ == '__main__':
-    gan = GAN(batch_size=50)
+    gan = GAN(batch_size=5)
     gan.build()
     gan.train(epoch=5000, sample_interval=20)
