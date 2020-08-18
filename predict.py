@@ -15,4 +15,4 @@ print(gan.sample(5, 1.00))
 print('=== Temperature = 1.25 ===')
 print(gan.sample(5, 1.25))
 
-print(gan.generate_poem(count=8,temperature=1.00))
+print(gan.generate_poem(count=8,temperature=1.00,seed='苟利国家生死以'))
