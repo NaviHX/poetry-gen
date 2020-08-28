@@ -108,8 +108,10 @@ class GAN:
         data = dataGenerator()
         start_time = datetime.datetime.now()
         self.print_log('Training Start At {}'.format(start_time))
-        real_out = np.ones([self.batch_size, 1])
-        fake_out = np.zeros([self.batch_size, 1])
+        # real_out = np.ones([self.batch_size, 1])
+        #fake_out = np.zeros([self.batch_size, 1])
+        real_out = np.random.normal(1.0, 0.3, size=[self.batch_size, 1])
+        fake_out = np.random.normal(0.0, 0.3, size=[self.batch_size, 1])
         gp_out = np.ones([self.batch_size, 1])
         for i in range(epoch):
             real_poem, noise = data.get(self.batch_size)
